@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="description" content="Professional multi-device biomechanics analysis — iPad dashboard + iPhone camera link, pose estimation, annotation & measurement." />
+  <meta name="description" content="Professional multi-device biomechanics analysis — iPad dashboard + dual iPhone camera link, pose estimation, annotation & measurement." />
   <title>Biomechanics Analysis Pro</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -14,19 +14,18 @@
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <style>
 /* ============================================================
-   Biomechanics Analysis Pro — Single-File Mobile Optimized
-   iPad Dashboard + iPhone Camera Link
+   Biomechanics Analysis Pro — Professional Multi-Camera
    ============================================================ */
 :root {
   --bg-deep: #070b10;
-  --bg-panel: rgba(16, 22, 31, 0.88);
-  --bg-elevated: rgba(26, 34, 46, 0.92);
+  --bg-panel: rgba(16, 22, 31, 0.9);
+  --bg-elevated: rgba(26, 34, 46, 0.94);
+  --bg-hover: rgba(36, 48, 64, 0.95);
   --border: rgba(255, 255, 255, 0.07);
-  --border-strong: rgba(0, 229, 255, 0.28);
+  --border-strong: rgba(0, 229, 255, 0.32);
   --text: #eef3f9;
   --text-muted: #8b9bb4;
   --accent: #00e5ff;
@@ -173,20 +172,32 @@ body {
 .btn-ghost { background: transparent; }
 .btn-sm { padding: 6px 10px; font-size: 12px; border-radius: 8px; }
 .btn-icon { width: 40px; height: 40px; padding: 0; border-radius: 10px; font-size: 18px; }
+.btn-tool {
+  width: 100%;
+  justify-content: flex-start;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  border-radius: 8px;
+  gap: 8px;
+}
+.btn-tool.active {
+  background: var(--accent-dim);
+  border-color: var(--border-strong);
+  color: var(--accent);
+}
 .file-btn { cursor: pointer; }
 
-/* Main layout — tablet first */
+/* Main layout — capture expands fully */
 .main-grid {
   flex: 1; display: grid;
-  grid-template-columns: 1fr 1.35fr;
-  grid-template-rows: 1fr auto;
+  grid-template-columns: 1.15fr 1fr;
   gap: 12px; padding: 12px;
   overflow: hidden; min-height: 0;
 }
-@media (max-width: 900px) {
+@media (max-width: 1000px) {
   .main-grid {
     grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr auto;
+    grid-template-rows: auto 1fr;
     overflow-y: auto;
   }
 }
@@ -204,8 +215,12 @@ body {
   padding: 12px 14px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  gap: 10px;
 }
-.panel-header h2 { font-size: 13px; font-weight: 600; letter-spacing: 0.2px; text-transform: uppercase; color: var(--text-muted); }
+.panel-header h2 {
+  font-size: 13px; font-weight: 600; letter-spacing: 0.2px;
+  text-transform: uppercase; color: var(--text-muted);
+}
 
 .status-pill {
   font-size: 11px; font-weight: 500;
@@ -215,9 +230,15 @@ body {
 .status-pill.ready { background: rgba(0, 230, 118, 0.15); color: var(--success); }
 .status-pill.error { background: rgba(255, 77, 109, 0.15); color: var(--danger); }
 .status-pill.linked { background: rgba(0, 229, 255, 0.2); color: var(--accent); box-shadow: 0 0 12px rgba(0, 229, 255, 0.3); }
+.status-pill.recording { background: rgba(255, 77, 109, 0.2); color: var(--danger); animation: pulse 1.4s ease-in-out infinite; }
 
-/* Capture / Link panel */
-.capture-panel { grid-row: 1 / 2; }
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.65; }
+}
+
+/* Capture panel — now fills available height */
+.capture-panel { min-height: 0; }
 .room-bar {
   display: flex; align-items: center; gap: 10px;
   padding: 10px 14px;
@@ -234,44 +255,130 @@ body {
 }
 .room-hint { font-size: 12px; color: var(--text-muted); flex: 1; min-width: 140px; }
 
+.cam-count-bar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.cam-count-bar label {
+  font-size: 12px; color: var(--text-muted); font-weight: 500;
+}
+.segmented {
+  display: inline-flex;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.segmented button {
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 7px 16px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all .15s;
+}
+.segmented button:not(:last-child) {
+  border-right: 1px solid var(--border);
+}
+.segmented button.active {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.segmented button:hover:not(.active) {
+  background: rgba(255,255,255,0.04);
+  color: var(--text);
+}
+
 .camera-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 8px; padding: 10px;
-  flex: 1; min-height: 0;
+  gap: 10px;
+  padding: 12px;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
 }
-@media (max-width: 1100px) {
-  .camera-grid { grid-template-columns: 1fr 1fr; }
+.camera-grid.cols-1 { grid-template-columns: 1fr; }
+.camera-grid.cols-2 { grid-template-columns: 1fr 1fr; }
+.camera-grid.cols-3 { grid-template-columns: 1fr 1fr 1fr; }
+.camera-grid.cols-4 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+
+@media (max-width: 700px) {
+  .camera-grid.cols-3,
+  .camera-grid.cols-4 { grid-template-columns: 1fr 1fr; }
 }
+
 .camera-card {
   position: relative;
   background: #000;
-  border-radius: 10px;
+  border-radius: 12px;
   overflow: hidden;
   border: 1px solid var(--border);
-  aspect-ratio: 16/10;
-  min-height: 100px;
+  min-height: 140px;
+  display: flex;
+  flex-direction: column;
+}
+.camera-card.remote-active {
+  border-color: rgba(0, 229, 255, 0.45);
+  box-shadow: 0 0 0 1px rgba(0, 229, 255, 0.15);
 }
 .camera-card video {
-  width: 100%; height: 100%;
+  width: 100%;
+  flex: 1;
   object-fit: cover;
   display: block;
   background: #0a0e14;
+  min-height: 0;
 }
+.camera-card-header {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  background: linear-gradient(180deg, rgba(0,0,0,0.75) 0%, transparent 100%);
+  pointer-events: none;
+}
+.camera-card-header > * { pointer-events: auto; }
 .camera-label {
-  position: absolute; top: 8px; left: 8px;
   font-size: 11px; font-weight: 600;
   padding: 3px 8px; border-radius: 6px;
-  background: rgba(0,0,0,0.65); color: #fff;
-  backdrop-filter: blur(6px);
+  background: rgba(0,0,0,0.55); color: #fff;
   letter-spacing: 0.3px;
+  white-space: nowrap;
 }
-.camera-card.remote .camera-label { background: rgba(0, 229, 255, 0.85); color: #001018; }
+.camera-card.remote-active .camera-label {
+  background: rgba(0, 229, 255, 0.9);
+  color: #001018;
+}
+.source-select {
+  flex: 1;
+  min-width: 0;
+  background: rgba(0,0,0,0.55);
+  border: 1px solid rgba(255,255,255,0.12);
+  color: #fff;
+  font-size: 11px;
+  font-family: inherit;
+  padding: 4px 8px;
+  border-radius: 6px;
+  max-width: 180px;
+}
+.source-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
 .timestamp {
-  position: absolute; bottom: 6px; right: 8px;
+  position: absolute; bottom: 8px; right: 10px;
   font-family: var(--mono); font-size: 11px;
   color: rgba(255,255,255,0.85);
   text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+  z-index: 2;
 }
 .remote-placeholder {
   position: absolute; inset: 0;
@@ -279,55 +386,128 @@ body {
   align-items: center; justify-content: center;
   gap: 8px; color: var(--text-muted); font-size: 13px;
   background: linear-gradient(180deg, #0c1219, #0a0e14);
+  z-index: 1;
 }
+.remote-placeholder.hidden { display: none; }
 .remote-placeholder .big-code {
-  font-family: var(--mono); font-size: 28px; letter-spacing: 6px;
-  color: var(--accent); opacity: 0.7;
+  font-family: var(--mono); font-size: 22px; letter-spacing: 4px;
+  color: var(--accent); opacity: 0.65;
+}
+.slot-badge {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.1);
+  color: rgba(255,255,255,0.7);
 }
 
 .controls-row {
   display: flex; flex-wrap: wrap; gap: 10px;
-  padding: 10px 14px; align-items: center;
+  padding: 12px 14px; align-items: center;
   border-top: 1px solid var(--border);
-}
-.select-wrap { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--text-muted); }
-.select-wrap select {
-  background: var(--bg-elevated); border: 1px solid var(--border);
-  color: var(--text); padding: 7px 10px; border-radius: 8px;
-  font-size: 13px; min-width: 120px;
 }
 .checkbox-label {
   display: flex; align-items: center; gap: 6px;
   font-size: 12px; color: var(--text-muted); cursor: pointer;
 }
-.record-row .btn { min-width: 120px; }
+.record-row .btn { min-width: 130px; }
 
 /* Replay / Analysis */
-.replay-panel { grid-column: 2; grid-row: 1 / 3; display: flex; flex-direction: column; }
-@media (max-width: 900px) {
-  .replay-panel { grid-column: 1; grid-row: auto; min-height: 380px; }
-}
+.replay-panel { display: flex; flex-direction: column; min-height: 0; }
 .workspace { flex: 1; display: flex; min-height: 0; overflow: hidden; }
+
 .toolbox {
-  width: 130px; flex-shrink: 0;
-  padding: 10px; border-right: 1px solid var(--border);
-  display: flex; flex-direction: column; gap: 10px;
+  width: 168px;
+  flex-shrink: 0;
+  padding: 12px 10px;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
   overflow-y: auto;
+  background: rgba(0,0,0,0.15);
 }
-.tool-group { display: flex; flex-direction: column; gap: 4px; }
-.tool-group label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-muted); }
-.tool-group select, .tool-group input[type="color"] {
-  width: 100%; background: var(--bg-elevated); border: 1px solid var(--border);
-  color: var(--text); padding: 6px; border-radius: 7px; font-size: 12px;
+.tool-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
-.tool-group input[type="range"] { width: 100%; accent-color: var(--accent); }
-.tool-actions { display: flex; flex-wrap: wrap; gap: 5px; }
-.scale-info #scaleDisplay { font-size: 12px; color: var(--accent); font-family: var(--mono); }
+.tool-section-title {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+  padding: 0 2px;
+}
+.tool-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+}
+.tool-grid .btn-tool {
+  justify-content: center;
+  padding: 9px 6px;
+  font-size: 11px;
+  flex-direction: column;
+  gap: 3px;
+}
+.tool-grid .btn-tool .t-icon { font-size: 16px; line-height: 1; }
+.tool-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.tool-group label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-muted);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.tool-group select,
+.tool-group input[type="color"] {
+  width: 100%;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 7px 8px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-family: inherit;
+}
+.tool-group input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+  height: 4px;
+}
+.tool-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+}
+.scale-info {
+  background: rgba(0, 229, 255, 0.06);
+  border: 1px solid rgba(0, 229, 255, 0.15);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.scale-info #scaleDisplay {
+  font-size: 12px;
+  color: var(--accent);
+  font-family: var(--mono);
+  margin-top: 2px;
+}
 
 .stage-wrap { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .stage {
   position: relative; flex: 1; background: #000;
-  overflow: hidden; min-height: 160px;
+  overflow: hidden; min-height: 180px;
   touch-action: none;
 }
 .stage video, .stage canvas {
@@ -359,19 +539,6 @@ body {
   display: flex; flex-wrap: wrap; gap: 8px;
   padding: 10px 12px; border-top: 1px solid var(--border);
 }
-
-/* Data panel */
-.data-panel { grid-column: 1; grid-row: 2; min-height: 180px; }
-@media (max-width: 900px) { .data-panel { grid-column: 1; } }
-.chart-wrap { flex: 1; padding: 8px; min-height: 120px; position: relative; }
-.chart-wrap canvas { width: 100% !important; height: 100% !important; }
-.data-stats {
-  display: grid; grid-template-columns: repeat(4, 1fr);
-  gap: 6px; padding: 8px 12px; border-top: 1px solid var(--border);
-}
-.stat { text-align: center; }
-.stat .label { display: block; font-size: 10px; color: var(--text-muted); text-transform: uppercase; }
-.stat .mono { font-size: 14px; color: var(--accent); }
 
 /* Camera Mode (iPhone) */
 .cam-mode-header {
@@ -449,7 +616,6 @@ body {
 }
 .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
 
-/* Utility */
 .hidden { display: none !important; }
   </style>
 </head>
@@ -466,7 +632,7 @@ body {
         <div class="icon">▦</div>
         <div>
           <strong>Dashboard (iPad)</strong>
-          <span>Primary control · shows live feeds &amp; analysis</span>
+          <span>Primary control · live feeds &amp; analysis</span>
         </div>
       </button>
       <button class="role-btn" id="btnRoleCam" type="button">
@@ -501,7 +667,7 @@ body {
   </header>
 
   <main class="main-grid">
-    <!-- Live Capture + Link -->
+    <!-- Live Capture (expanded) -->
     <section class="panel capture-panel">
       <div class="panel-header">
         <h2>Live Capture</h2>
@@ -512,40 +678,22 @@ body {
         <span style="font-size:12px;color:var(--text-muted)">Room Code</span>
         <div class="room-code" id="roomCodeDisplay">————</div>
         <button id="btnCopyCode" class="btn btn-sm btn-ghost" title="Copy code">Copy</button>
-        <span class="room-hint">Enter this code on the iPhone to link its camera</span>
+        <span class="room-hint">Share this code with up to 2 iPhones to link cameras</span>
       </div>
 
-      <div class="camera-grid">
-        <div class="camera-card">
-          <div class="camera-label">Local A</div>
-          <video id="camLeft" autoplay muted playsinline></video>
-          <div class="timestamp" id="tsLeft">--:--:--.--</div>
+      <div class="cam-count-bar">
+        <label>Cameras</label>
+        <div class="segmented" id="camCountSeg">
+          <button type="button" data-count="1">1</button>
+          <button type="button" data-count="2" class="active">2</button>
+          <button type="button" data-count="3">3</button>
+          <button type="button" data-count="4">4</button>
         </div>
-        <div class="camera-card">
-          <div class="camera-label">Local B</div>
-          <video id="camRight" autoplay muted playsinline></video>
-          <div class="timestamp" id="tsRight">--:--:--.--</div>
-        </div>
-        <div class="camera-card remote" id="remoteCard">
-          <div class="camera-label">iPhone · Linked</div>
-          <video id="camRemote" autoplay muted playsinline></video>
-          <div class="remote-placeholder" id="remotePlaceholder">
-            <div class="big-code" id="placeholderCode">······</div>
-            <span>Waiting for iPhone…</span>
-          </div>
-          <div class="timestamp" id="tsRemote">--:--:--.--</div>
-        </div>
+        <span style="font-size:12px;color:var(--text-muted);margin-left:auto" id="remoteCountLabel">0 / 2 iPhones linked</span>
       </div>
 
-      <div class="controls-row">
-        <label class="select-wrap">
-          <span>Local A</span>
-          <select id="selectLeft"></select>
-        </label>
-        <label class="select-wrap">
-          <span>Local B</span>
-          <select id="selectRight"></select>
-        </label>
+      <div class="camera-grid cols-2" id="cameraGrid">
+        <!-- Slots injected by JS -->
       </div>
 
       <div class="controls-row record-row">
@@ -566,7 +714,7 @@ body {
     <section class="panel replay-panel">
       <div class="panel-header">
         <h2>Analysis Workspace</h2>
-        <div class="header-tools">
+        <div class="header-tools" style="display:flex;gap:6px">
           <button id="btnTogglePose" class="btn btn-sm btn-ghost">Pose</button>
           <button id="btnCalibrate" class="btn btn-sm btn-ghost">Calibrate</button>
         </div>
@@ -574,39 +722,66 @@ body {
 
       <div class="workspace">
         <aside class="toolbox">
-          <div class="tool-group">
-            <label>Tool</label>
-            <select id="toolSelect">
-              <option value="select">Select</option>
-              <option value="free">Freehand</option>
-              <option value="line">Line</option>
-              <option value="arrow">Arrow</option>
-              <option value="rect">Rectangle</option>
-              <option value="circle">Circle</option>
-              <option value="angle">Angle</option>
-              <option value="distance">Distance</option>
-              <option value="text">Text</option>
-            </select>
+          <div class="tool-section">
+            <div class="tool-section-title">Annotation</div>
+            <div class="tool-grid" id="toolGrid">
+              <button type="button" class="btn btn-tool active" data-tool="select">
+                <span class="t-icon">↖</span> Select
+              </button>
+              <button type="button" class="btn btn-tool" data-tool="free">
+                <span class="t-icon">✎</span> Free
+              </button>
+              <button type="button" class="btn btn-tool" data-tool="line">
+                <span class="t-icon">／</span> Line
+              </button>
+              <button type="button" class="btn btn-tool" data-tool="arrow">
+                <span class="t-icon">→</span> Arrow
+              </button>
+              <button type="button" class="btn btn-tool" data-tool="rect">
+                <span class="t-icon">▢</span> Rect
+              </button>
+              <button type="button" class="btn btn-tool" data-tool="circle">
+                <span class="t-icon">○</span> Circle
+              </button>
+              <button type="button" class="btn btn-tool" data-tool="distance">
+                <span class="t-icon">↔</span> Dist
+              </button>
+              <button type="button" class="btn btn-tool" data-tool="angle">
+                <span class="t-icon">∠</span> Angle
+              </button>
+              <button type="button" class="btn btn-tool" data-tool="text">
+                <span class="t-icon">T</span> Text
+              </button>
+            </div>
           </div>
-          <div class="tool-group">
-            <label>Color</label>
-            <input type="color" id="colorPicker" value="#00e5ff" />
+
+          <div class="tool-section">
+            <div class="tool-section-title">Style</div>
+            <div class="tool-group">
+              <label>Color</label>
+              <input type="color" id="colorPicker" value="#00e5ff" />
+            </div>
+            <div class="tool-group">
+              <label>Width <span id="widthVal">2</span></label>
+              <input type="range" id="lineWidth" min="1" max="12" value="2" />
+            </div>
+            <div class="tool-group">
+              <label>Opacity <span id="opacityVal">100%</span></label>
+              <input type="range" id="opacity" min="20" max="100" value="100" />
+            </div>
           </div>
-          <div class="tool-group">
-            <label>Width <span id="widthVal">2</span></label>
-            <input type="range" id="lineWidth" min="1" max="12" value="2" />
+
+          <div class="tool-section">
+            <div class="tool-section-title">History</div>
+            <div class="tool-actions">
+              <button id="btnUndo" class="btn btn-sm">Undo</button>
+              <button id="btnRedo" class="btn btn-sm">Redo</button>
+              <button id="btnClear" class="btn btn-sm btn-danger" style="grid-column:1/-1">Clear All</button>
+            </div>
           </div>
-          <div class="tool-group">
-            <label>Opacity <span id="opacityVal">100%</span></label>
-            <input type="range" id="opacity" min="20" max="100" value="100" />
-          </div>
-          <div class="tool-actions">
-            <button id="btnUndo" class="btn btn-sm">Undo</button>
-            <button id="btnRedo" class="btn btn-sm">Redo</button>
-            <button id="btnClear" class="btn btn-sm btn-danger">Clear</button>
-          </div>
-          <div class="tool-group scale-info">
-            <label>Scale</label>
+
+          <div class="tool-section scale-info">
+            <div class="tool-section-title">Scale</div>
             <div id="scaleDisplay">Not calibrated</div>
           </div>
         </aside>
@@ -635,34 +810,7 @@ body {
 
       <div class="export-row">
         <button id="btnExportWebM" class="btn btn-primary">Export WebM</button>
-        <button id="btnExportCSV" class="btn">Export Angles CSV</button>
         <button id="btnExportJSON" class="btn">Export Session</button>
-      </div>
-    </section>
-
-    <!-- Charts -->
-    <section class="panel data-panel">
-      <div class="panel-header">
-        <h2>Joint Angles</h2>
-        <select id="jointSelect">
-          <option value="left_knee">Left Knee</option>
-          <option value="right_knee">Right Knee</option>
-          <option value="left_hip">Left Hip</option>
-          <option value="right_hip">Right Hip</option>
-          <option value="left_elbow">Left Elbow</option>
-          <option value="right_elbow">Right Elbow</option>
-          <option value="left_shoulder">Left Shoulder</option>
-          <option value="right_shoulder">Right Shoulder</option>
-        </select>
-      </div>
-      <div class="chart-wrap">
-        <canvas id="angleChart"></canvas>
-      </div>
-      <div class="data-stats" id="statsPanel">
-        <div class="stat"><span class="label">Current</span><span id="statCurrent" class="mono">—</span></div>
-        <div class="stat"><span class="label">Min</span><span id="statMin" class="mono">—</span></div>
-        <div class="stat"><span class="label">Max</span><span id="statMax" class="mono">—</span></div>
-        <div class="stat"><span class="label">Range</span><span id="statRange" class="mono">—</span></div>
       </div>
     </section>
   </main>
@@ -701,7 +849,7 @@ body {
 <div id="calModal" class="modal" hidden>
   <div class="modal-content">
     <h3>Calibrate Scale</h3>
-    <p>Draw a line on a known real-world distance, then enter the length.</p>
+    <p>Draw a Distance or Line on a known real-world length, then enter the value.</p>
     <label>
       Known length
       <input type="number" id="knownLength" value="100" min="1" step="0.1" />
@@ -723,7 +871,7 @@ body {
 
 <script>
 /* ============================================================
-   Biomechanics Analysis Pro — Single File Application
+   Biomechanics Analysis Pro — Multi-Camera Professional
    ============================================================ */
 
 (function () {
@@ -756,14 +904,16 @@ body {
 
   // ---------- Global State ----------
   const state = {
-    role: null, // 'host' | 'cam'
+    role: null,
     roomCode: null,
     peer: null,
-    conn: null,
-    call: null,
-    localStreamA: null,
-    localStreamB: null,
-    remoteStream: null,
+    // Up to 2 remote iPhone streams
+    remoteStreams: [null, null],   // MediaStream
+    remoteCalls: [null, null],     // PeerJS MediaConnection
+    localDevices: [],              // { deviceId, label }
+    // Per-slot configuration
+    cameraCount: 2,
+    slots: [],                     // { id, source: 'none'|'local:xxx'|'remote:0'|'remote:1', stream, videoEl }
     phoneStream: null,
     phoneFacing: 'environment',
     recording: false,
@@ -773,7 +923,6 @@ body {
     scalePxPerUnit: null,
     unit: 'cm',
     annotations: [],
-    poseFrames: [],
     zoom: 1,
     panX: 0,
     panY: 0
@@ -798,14 +947,23 @@ body {
     document.getElementById('roleScreen').style.display = 'none';
     document.getElementById('app').classList.add('active');
     document.getElementById('roomCodeDisplay').textContent = state.roomCode;
-    document.getElementById('placeholderCode').textContent = state.roomCode;
 
     document.getElementById('btnCopyCode').onclick = () => {
       navigator.clipboard?.writeText(state.roomCode).then(() => toast('Code copied'));
     };
 
+    // Camera count segmented control
+    document.querySelectorAll('#camCountSeg button').forEach(btn => {
+      btn.onclick = () => {
+        document.querySelectorAll('#camCountSeg button').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        setCameraCount(+btn.dataset.count);
+      };
+    });
+
     initPeerHost();
-    await initLocalCameras();
+    await enumerateLocalDevices();
+    setCameraCount(2);
     startTimestamps();
     bindHostUI();
   }
@@ -825,27 +983,39 @@ body {
     state.peer.on('open', (id) => {
       console.log('Host peer open', id);
       setCameraStatus('Ready · Code active', 'ready');
-      toast('Dashboard ready. Share the room code with the iPhone.');
+      toast('Dashboard ready. Share the room code with iPhones.');
     });
 
     state.peer.on('call', (call) => {
-      console.log('Incoming call from phone');
-      state.call = call;
-      call.answer(); // no outbound stream needed from host for video
+      // Find first free remote slot (0 or 1)
+      let slotIdx = state.remoteStreams.findIndex(s => !s);
+      if (slotIdx === -1) {
+        toast('Maximum 2 iPhones already linked');
+        call.close();
+        return;
+      }
+
+      console.log('Incoming call → remote slot', slotIdx);
+      state.remoteCalls[slotIdx] = call;
+      call.answer();
+
       call.on('stream', (remoteStream) => {
-        state.remoteStream = remoteStream;
-        const v = document.getElementById('camRemote');
-        v.srcObject = remoteStream;
-        v.play().catch(() => {});
-        document.getElementById('remotePlaceholder').classList.add('hidden');
-        setCameraStatus('iPhone linked', 'linked');
-        toast('iPhone camera linked successfully');
+        state.remoteStreams[slotIdx] = remoteStream;
+        updateRemoteCountLabel();
+        // Auto-assign to first empty slot that is set to this remote, or refresh sources
+        refreshAllSlotSources();
+        setCameraStatus(getLinkedCount() + ' iPhone(s) linked', 'linked');
+        toast(`iPhone linked as Remote ${slotIdx + 1}`);
       });
+
       call.on('close', () => {
-        document.getElementById('remotePlaceholder').classList.remove('hidden');
-        document.getElementById('camRemote').srcObject = null;
-        setCameraStatus('Ready · Code active', 'ready');
-        toast('iPhone disconnected');
+        state.remoteStreams[slotIdx] = null;
+        state.remoteCalls[slotIdx] = null;
+        updateRemoteCountLabel();
+        refreshAllSlotSources();
+        const count = getLinkedCount();
+        setCameraStatus(count ? count + ' iPhone(s) linked' : 'Ready · Code active', count ? 'linked' : 'ready');
+        toast(`Remote ${slotIdx + 1} disconnected`);
       });
     });
 
@@ -854,7 +1024,6 @@ body {
       if (err.type === 'unavailable-id') {
         state.roomCode = genRoomCode();
         document.getElementById('roomCodeDisplay').textContent = state.roomCode;
-        document.getElementById('placeholderCode').textContent = state.roomCode;
         try { state.peer.destroy(); } catch (_) {}
         initPeerHost();
       } else {
@@ -863,33 +1032,27 @@ body {
     });
   }
 
-  async function initLocalCameras() {
+  function getLinkedCount() {
+    return state.remoteStreams.filter(Boolean).length;
+  }
+
+  function updateRemoteCountLabel() {
+    document.getElementById('remoteCountLabel').textContent =
+      `${getLinkedCount()} / 2 iPhones linked`;
+  }
+
+  async function enumerateLocalDevices() {
     try {
+      // Permission priming
       const temp = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
       temp.getTracks().forEach(t => t.stop());
 
-      const devices = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
-      const leftSel = document.getElementById('selectLeft');
-      const rightSel = document.getElementById('selectRight');
-      leftSel.innerHTML = '';
-      rightSel.innerHTML = '';
-
-      if (devices.length === 0) {
-        setCameraStatus('No local cameras', 'error');
-        return;
-      }
-
-      devices.forEach((d, i) => {
-        const label = d.label || `Camera ${i + 1}`;
-        leftSel.add(new Option(label, d.deviceId));
-        rightSel.add(new Option(label, d.deviceId));
-      });
-      leftSel.selectedIndex = 0;
-      rightSel.selectedIndex = Math.min(1, devices.length - 1);
-
-      leftSel.onchange = () => updateLocalStreams();
-      rightSel.onchange = () => updateLocalStreams();
-      await updateLocalStreams();
+      const devices = (await navigator.mediaDevices.enumerateDevices())
+        .filter(d => d.kind === 'videoinput');
+      state.localDevices = devices.map((d, i) => ({
+        deviceId: d.deviceId,
+        label: d.label || `Camera ${i + 1}`
+      }));
       document.getElementById('btnStart').disabled = false;
     } catch (err) {
       console.error(err);
@@ -898,34 +1061,162 @@ body {
     }
   }
 
-  async function updateLocalStreams() {
-    const leftId = document.getElementById('selectLeft').value;
-    const rightId = document.getElementById('selectRight').value;
-    try {
-      if (state.localStreamA) state.localStreamA.getTracks().forEach(t => t.stop());
-      if (state.localStreamB) state.localStreamB.getTracks().forEach(t => t.stop());
+  function setCameraCount(n) {
+    state.cameraCount = n;
+    const grid = document.getElementById('cameraGrid');
+    grid.className = 'camera-grid cols-' + n;
 
-      const constraints = (deviceId) => ({
-        video: {
-          deviceId: deviceId ? { exact: deviceId } : undefined,
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          frameRate: { ideal: 30 }
-        },
-        audio: false
+    // Preserve existing slot configs where possible
+    const prev = state.slots.slice(0, n);
+    state.slots = [];
+
+    for (let i = 0; i < n; i++) {
+      const existing = prev[i];
+      state.slots.push({
+        id: i,
+        source: existing ? existing.source : (i === 0 && state.localDevices[0] ? 'local:' + state.localDevices[0].deviceId : 'none'),
+        stream: null,
+        videoEl: null
       });
-
-      state.localStreamA = await navigator.mediaDevices.getUserMedia(constraints(leftId));
-      state.localStreamB = await navigator.mediaDevices.getUserMedia(constraints(rightId));
-
-      const vL = document.getElementById('camLeft');
-      const vR = document.getElementById('camRight');
-      vL.srcObject = state.localStreamA;
-      vR.srcObject = state.localStreamB;
-      await Promise.all([vL.play(), vR.play()]);
-    } catch (err) {
-      toast('Camera switch failed: ' + err.message);
     }
+
+    renderCameraSlots();
+    // Start streams for new configuration
+    state.slots.forEach((slot, idx) => applySlotSource(idx));
+  }
+
+  function buildSourceOptions(currentValue) {
+    let html = '<option value="none">— None —</option>';
+    state.localDevices.forEach(d => {
+      const sel = currentValue === 'local:' + d.deviceId ? ' selected' : '';
+      html += `<option value="local:${d.deviceId}"${sel}>${d.label}</option>`;
+    });
+    // Remote options
+    for (let r = 0; r < 2; r++) {
+      const val = 'remote:' + r;
+      const linked = !!state.remoteStreams[r];
+      const sel = currentValue === val ? ' selected' : '';
+      const label = linked ? `iPhone · Remote ${r + 1}` : `iPhone · Remote ${r + 1} (waiting)`;
+      html += `<option value="${val}"${sel}>${label}</option>`;
+    }
+    return html;
+  }
+
+  function renderCameraSlots() {
+    const grid = document.getElementById('cameraGrid');
+    grid.innerHTML = '';
+
+    state.slots.forEach((slot, idx) => {
+      const card = document.createElement('div');
+      card.className = 'camera-card';
+      card.id = 'camCard' + idx;
+      if (slot.source.startsWith('remote:') && state.remoteStreams[+slot.source.split(':')[1]]) {
+        card.classList.add('remote-active');
+      }
+
+      card.innerHTML = `
+        <div class="camera-card-header">
+          <span class="camera-label">Cam ${idx + 1}</span>
+          <select class="source-select" data-slot="${idx}">
+            ${buildSourceOptions(slot.source)}
+          </select>
+        </div>
+        <video id="camVideo${idx}" autoplay muted playsinline></video>
+        <div class="remote-placeholder" id="placeholder${idx}">
+          <div class="big-code">${state.roomCode || '······'}</div>
+          <span>Select a source</span>
+        </div>
+        <div class="timestamp" id="ts${idx}">--:--:--.--</div>
+      `;
+      grid.appendChild(card);
+
+      const sel = card.querySelector('.source-select');
+      sel.onchange = () => {
+        state.slots[idx].source = sel.value;
+        applySlotSource(idx);
+      };
+
+      state.slots[idx].videoEl = card.querySelector('video');
+    });
+  }
+
+  async function applySlotSource(idx) {
+    const slot = state.slots[idx];
+    if (!slot) return;
+
+    // Stop previous local stream if any
+    if (slot.stream && slot.source.startsWith('local:')) {
+      // Only stop if no other slot is using the same device
+      const deviceId = slot.source.split(':')[1];
+      const stillUsed = state.slots.some((s, i) => i !== idx && s.source === slot.source && s.stream);
+      if (!stillUsed && slot.stream) {
+        slot.stream.getTracks().forEach(t => t.stop());
+      }
+    }
+    slot.stream = null;
+
+    const video = slot.videoEl || document.getElementById('camVideo' + idx);
+    const placeholder = document.getElementById('placeholder' + idx);
+    const card = document.getElementById('camCard' + idx);
+    if (!video) return;
+
+    video.srcObject = null;
+    if (placeholder) {
+      placeholder.classList.remove('hidden');
+      placeholder.querySelector('span').textContent = 'Select a source';
+    }
+    if (card) card.classList.remove('remote-active');
+
+    if (slot.source === 'none') return;
+
+    if (slot.source.startsWith('local:')) {
+      const deviceId = slot.source.split(':')[1];
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            deviceId: { exact: deviceId },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            frameRate: { ideal: 30 }
+          },
+          audio: false
+        });
+        slot.stream = stream;
+        video.srcObject = stream;
+        await video.play().catch(() => {});
+        if (placeholder) placeholder.classList.add('hidden');
+      } catch (err) {
+        toast('Camera failed: ' + err.message);
+        if (placeholder) placeholder.querySelector('span').textContent = 'Camera error';
+      }
+    } else if (slot.source.startsWith('remote:')) {
+      const rIdx = +slot.source.split(':')[1];
+      const remote = state.remoteStreams[rIdx];
+      if (remote) {
+        video.srcObject = remote;
+        await video.play().catch(() => {});
+        if (placeholder) placeholder.classList.add('hidden');
+        if (card) card.classList.add('remote-active');
+      } else {
+        if (placeholder) {
+          placeholder.classList.remove('hidden');
+          placeholder.querySelector('span').textContent = `Waiting for iPhone ${rIdx + 1}…`;
+        }
+      }
+    }
+  }
+
+  function refreshAllSlotSources() {
+    // Rebuild selects (to update linked status labels) and re-apply
+    state.slots.forEach((slot, idx) => {
+      const sel = document.querySelector(`.source-select[data-slot="${idx}"]`);
+      if (sel) {
+        const current = slot.source;
+        sel.innerHTML = buildSourceOptions(current);
+        sel.value = current;
+      }
+      applySlotSource(idx);
+    });
   }
 
   function setCameraStatus(text, cls) {
@@ -937,17 +1228,16 @@ body {
   function startTimestamps() {
     const tick = () => {
       const s = nowStamp();
-      const ids = ['tsLeft', 'tsRight', 'tsRemote'];
-      ids.forEach(id => {
-        const el = document.getElementById(id);
+      for (let i = 0; i < 4; i++) {
+        const el = document.getElementById('ts' + i);
         if (el) el.textContent = s;
-      });
+      }
       requestAnimationFrame(tick);
     };
     tick();
   }
 
-  // ---------- Recording (side-by-side composite) ----------
+  // ---------- Recording ----------
   function bindHostUI() {
     document.getElementById('btnStart').onclick = startRecording;
     document.getElementById('btnStop').onclick = stopRecording;
@@ -970,7 +1260,6 @@ body {
       document.getElementById('opacityVal').textContent = e.target.value + '%';
     };
     document.getElementById('btnExportWebM').onclick = exportWebM;
-    document.getElementById('btnExportCSV').onclick = exportCSV;
     document.getElementById('btnExportJSON').onclick = exportJSON;
     document.getElementById('btnSaveSession').onclick = exportJSON;
     document.getElementById('btnLoadSession').onclick = loadSession;
@@ -985,25 +1274,40 @@ body {
       if (vid) vid.playbackRate = v;
     };
 
+    // Tool selection buttons
+    document.querySelectorAll('#toolGrid .btn-tool').forEach(btn => {
+      btn.onclick = () => {
+        document.querySelectorAll('#toolGrid .btn-tool').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentTool = btn.dataset.tool;
+      };
+    });
+
     initDrawing();
     initPlayerControls();
   }
 
   function startRecording() {
+    const n = state.cameraCount;
     const canvas = document.createElement('canvas');
-    canvas.width = 1920;
-    canvas.height = 720;
+    // Layout: 1 → full, 2 → side by side, 3 → three across, 4 → 2×2
+    if (n === 1) {
+      canvas.width = 1280; canvas.height = 720;
+    } else if (n === 2) {
+      canvas.width = 1920; canvas.height = 720;
+    } else if (n === 3) {
+      canvas.width = 1920; canvas.height = 540;
+    } else {
+      canvas.width = 1280; canvas.height = 720;
+    }
     const ctx = canvas.getContext('2d');
-    const vL = document.getElementById('camLeft');
-    const vR = document.getElementById('camRight');
-    const vRem = document.getElementById('camRemote');
 
     const stream = canvas.captureStream(30);
     state.recordedChunks = [];
     const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
       ? 'video/webm;codecs=vp9'
       : 'video/webm';
-    state.mediaRecorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 5000000 });
+    state.mediaRecorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 6000000 });
     state.mediaRecorder.ondataavailable = (e) => {
       if (e.data.size > 0) state.recordedChunks.push(e.data);
     };
@@ -1028,31 +1332,62 @@ body {
     state.recording = true;
     document.getElementById('btnStart').disabled = true;
     document.getElementById('btnStop').disabled = false;
-    setCameraStatus('Recording…', 'error');
+    setCameraStatus('Recording…', 'recording');
 
     function drawFrame() {
       if (!state.recording) return;
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-      const w = canvas.width / 3;
-      if (vL.readyState >= 2) ctx.drawImage(vL, 0, 0, w, canvas.height);
-      if (vR.readyState >= 2) ctx.drawImage(vR, w, 0, w, canvas.height);
-      if (vRem.srcObject && vRem.readyState >= 2) {
-        ctx.drawImage(vRem, w * 2, 0, w, canvas.height);
-      } else {
-        ctx.fillStyle = '#111';
-        ctx.fillRect(w * 2, 0, w, canvas.height);
-        ctx.fillStyle = '#444';
-        ctx.font = '20px Inter';
-        ctx.fillText('No iPhone', w * 2 + 40, canvas.height / 2);
-      }
-      // timestamps
+
+      const videos = state.slots.map((s, i) => document.getElementById('camVideo' + i)).filter(Boolean);
+      const ts = nowStamp();
       ctx.fillStyle = 'rgba(255,255,255,0.85)';
       ctx.font = '14px JetBrains Mono';
-      const ts = nowStamp();
-      ctx.fillText(ts, 12, canvas.height - 12);
-      ctx.fillText(ts, w + 12, canvas.height - 12);
-      ctx.fillText(ts, w * 2 + 12, canvas.height - 12);
+
+      if (n === 1) {
+        const v = videos[0];
+        if (v && v.readyState >= 2) ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+        ctx.fillText(ts, 12, canvas.height - 12);
+      } else if (n === 2) {
+        const w = canvas.width / 2;
+        videos.forEach((v, i) => {
+          if (v && v.readyState >= 2) ctx.drawImage(v, i * w, 0, w, canvas.height);
+          else {
+            ctx.fillStyle = '#111';
+            ctx.fillRect(i * w, 0, w, canvas.height);
+            ctx.fillStyle = '#444';
+            ctx.fillText('No signal', i * w + 40, canvas.height / 2);
+            ctx.fillStyle = 'rgba(255,255,255,0.85)';
+          }
+          ctx.fillText(ts, i * w + 12, canvas.height - 12);
+        });
+      } else if (n === 3) {
+        const w = canvas.width / 3;
+        videos.forEach((v, i) => {
+          if (v && v.readyState >= 2) ctx.drawImage(v, i * w, 0, w, canvas.height);
+          else {
+            ctx.fillStyle = '#111';
+            ctx.fillRect(i * w, 0, w, canvas.height);
+            ctx.fillStyle = 'rgba(255,255,255,0.85)';
+          }
+          ctx.fillText(ts, i * w + 12, canvas.height - 12);
+        });
+      } else {
+        // 2×2
+        const w = canvas.width / 2;
+        const h = canvas.height / 2;
+        videos.forEach((v, i) => {
+          const x = (i % 2) * w;
+          const y = Math.floor(i / 2) * h;
+          if (v && v.readyState >= 2) ctx.drawImage(v, x, y, w, h);
+          else {
+            ctx.fillStyle = '#111';
+            ctx.fillRect(x, y, w, h);
+            ctx.fillStyle = 'rgba(255,255,255,0.85)';
+          }
+          ctx.fillText(ts, x + 12, y + h - 12);
+        });
+      }
       requestAnimationFrame(drawFrame);
     }
     state.mediaRecorder.start(100);
@@ -1067,7 +1402,8 @@ body {
     }
     document.getElementById('btnStart').disabled = false;
     document.getElementById('btnStop').disabled = true;
-    setCameraStatus(state.remoteStream ? 'iPhone linked' : 'Ready · Code active', state.remoteStream ? 'linked' : 'ready');
+    const count = getLinkedCount();
+    setCameraStatus(count ? count + ' iPhone(s) linked' : 'Ready · Code active', count ? 'linked' : 'ready');
   }
 
   // ---------- Player ----------
@@ -1129,12 +1465,14 @@ body {
     };
   }
 
-  // ---------- Drawing (simplified but solid) ----------
+  // ---------- Drawing ----------
   let drawHistory = [];
   let drawRedo = [];
   let isDrawing = false;
   let currentPath = null;
   let points = [];
+  let currentTool = 'select';
+  let anglePoints = []; // for 3-point angle tool
 
   function initDrawing() {
     const canvas = document.getElementById('drawCanvas');
@@ -1165,12 +1503,60 @@ body {
 
     function start(e) {
       e.preventDefault();
-      const tool = document.getElementById('toolSelect').value;
-      if (tool === 'select') return;
+      if (currentTool === 'select') return;
+
+      if (currentTool === 'angle') {
+        const p = getPos(e);
+        anglePoints.push(p);
+        if (anglePoints.length === 1) {
+          currentPath = {
+            tool: 'angle',
+            color: document.getElementById('colorPicker').value,
+            width: +document.getElementById('lineWidth').value,
+            opacity: +document.getElementById('opacity').value / 100,
+            points: [p]
+          };
+          isDrawing = true;
+        } else if (anglePoints.length === 2) {
+          currentPath.points.push(p);
+          redrawAll();
+          drawShape(currentPath, true);
+        } else if (anglePoints.length >= 3) {
+          currentPath.points.push(p);
+          drawHistory.push(currentPath);
+          drawRedo = [];
+          state.annotations = drawHistory;
+          currentPath = null;
+          anglePoints = [];
+          isDrawing = false;
+          redrawAll();
+        }
+        return;
+      }
+
+      if (currentTool === 'text') {
+        const p = getPos(e);
+        const text = prompt('Enter label text:');
+        if (text) {
+          drawHistory.push({
+            tool: 'text',
+            color: document.getElementById('colorPicker').value,
+            width: +document.getElementById('lineWidth').value,
+            opacity: +document.getElementById('opacity').value / 100,
+            points: [p],
+            text
+          });
+          drawRedo = [];
+          state.annotations = drawHistory;
+          redrawAll();
+        }
+        return;
+      }
+
       isDrawing = true;
       points = [getPos(e)];
       currentPath = {
-        tool,
+        tool: currentTool,
         color: document.getElementById('colorPicker').value,
         width: +document.getElementById('lineWidth').value,
         opacity: +document.getElementById('opacity').value / 100,
@@ -1179,8 +1565,20 @@ body {
     }
 
     function move(e) {
-      if (!isDrawing) return;
+      if (!isDrawing || !currentPath) return;
       e.preventDefault();
+      if (currentTool === 'angle') {
+        // live preview of second or third point
+        const p = getPos(e);
+        if (anglePoints.length === 1) {
+          currentPath.points = [anglePoints[0], p];
+        } else if (anglePoints.length === 2) {
+          currentPath.points = [anglePoints[0], anglePoints[1], p];
+        }
+        redrawAll();
+        drawShape(currentPath, true);
+        return;
+      }
       points.push(getPos(e));
       currentPath.points = [...points];
       redrawAll();
@@ -1188,6 +1586,7 @@ body {
     }
 
     function end(e) {
+      if (currentTool === 'angle') return; // handled in start
       if (!isDrawing) return;
       isDrawing = false;
       if (currentPath && currentPath.points.length > 1) {
@@ -1251,12 +1650,17 @@ body {
       ctx.beginPath();
       ctx.arc(a.x, a.y, r, 0, Math.PI * 2);
       ctx.stroke();
-    } else if (shape.tool === 'distance' || shape.tool === 'angle') {
+    } else if (shape.tool === 'distance') {
       const a = pts[0], b = pts[pts.length - 1];
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b.x, b.y);
       ctx.stroke();
+      // End caps
+      ctx.beginPath();
+      ctx.arc(a.x, a.y, 3, 0, Math.PI * 2);
+      ctx.arc(b.x, b.y, 3, 0, Math.PI * 2);
+      ctx.fill();
       const dist = Math.hypot(b.x - a.x, b.y - a.y);
       let label = dist.toFixed(0) + ' px';
       if (state.scalePxPerUnit) {
@@ -1264,9 +1668,36 @@ body {
         label = real.toFixed(1) + ' ' + state.unit;
       }
       ctx.font = '13px Inter';
-      ctx.fillText(label, (a.x + b.x) / 2 + 6, (a.y + b.y) / 2 - 6);
+      ctx.fillText(label, (a.x + b.x) / 2 + 8, (a.y + b.y) / 2 - 8);
+    } else if (shape.tool === 'angle') {
+      if (pts.length >= 2) {
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        ctx.lineTo(pts[1].x, pts[1].y);
+        if (pts.length >= 3) ctx.lineTo(pts[2].x, pts[2].y);
+        ctx.stroke();
+        // Vertex marker
+        ctx.beginPath();
+        ctx.arc(pts[1].x, pts[1].y, 4, 0, Math.PI * 2);
+        ctx.fill();
+        if (pts.length >= 3) {
+          const deg = angleBetween(pts[0], pts[1], pts[2]);
+          ctx.font = '13px Inter';
+          ctx.fillText(deg.toFixed(1) + '°', pts[1].x + 10, pts[1].y - 10);
+        }
+      }
+    } else if (shape.tool === 'text' && shape.text) {
+      ctx.font = `${Math.max(14, shape.width * 6)}px Inter`;
+      ctx.fillText(shape.text, pts[0].x, pts[0].y);
     }
     ctx.restore();
+  }
+
+  function angleBetween(a, b, c) {
+    const rad = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
+    let deg = Math.abs(rad * 180 / Math.PI);
+    if (deg > 180) deg = 360 - deg;
+    return deg;
   }
 
   function redrawAll() {
@@ -1289,11 +1720,11 @@ body {
   function clearDraw() {
     drawHistory = [];
     drawRedo = [];
+    anglePoints = [];
     redrawAll();
   }
 
   function applyCalibration() {
-    // Expect user drew a distance line as last annotation
     const last = drawHistory[drawHistory.length - 1];
     if (!last || (last.tool !== 'distance' && last.tool !== 'line')) {
       toast('Draw a Distance or Line on a known length first');
@@ -1308,6 +1739,7 @@ body {
       `1 ${state.unit} = ${state.scalePxPerUnit.toFixed(1)} px`;
     document.getElementById('calModal').hidden = true;
     toast('Scale calibrated');
+    redrawAll(); // refresh distance labels
   }
 
   // ---------- Pose (MediaPipe) ----------
@@ -1366,7 +1798,6 @@ body {
       }
       requestAnimationFrame(loop);
     }
-    // Also process on scrub / pause
     vid.addEventListener('seeked', async () => {
       if (state.poseEnabled && pose) await pose.send({ image: vid });
     });
@@ -1384,132 +1815,29 @@ body {
     if (results.poseLandmarks) {
       drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#00e5ff', lineWidth: 2 });
       drawLandmarks(ctx, results.poseLandmarks, { color: '#ffffff', lineWidth: 1, radius: 3 });
-      updateAngleChart(results.poseLandmarks);
     }
     ctx.restore();
   }
 
-  // Simple angle helpers
-  function angleAt(a, b, c) {
-    const rad = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
-    let deg = Math.abs(rad * 180 / Math.PI);
-    if (deg > 180) deg = 360 - deg;
-    return deg;
-  }
-
-  const angleSeries = {};
-  let chart = null;
-
-  function updateAngleChart(lm) {
-    const joints = {
-      left_knee: [lm[23], lm[25], lm[27]],
-      right_knee: [lm[24], lm[26], lm[28]],
-      left_hip: [lm[11], lm[23], lm[25]],
-      right_hip: [lm[12], lm[24], lm[26]],
-      left_elbow: [lm[11], lm[13], lm[15]],
-      right_elbow: [lm[12], lm[14], lm[16]],
-      left_shoulder: [lm[13], lm[11], lm[23]],
-      right_shoulder: [lm[14], lm[12], lm[24]]
-    };
-    const sel = document.getElementById('jointSelect').value;
-    const pts = joints[sel];
-    if (!pts || !pts[0]) return;
-    const deg = angleAt(pts[0], pts[1], pts[2]);
-    if (!angleSeries[sel]) angleSeries[sel] = [];
-    angleSeries[sel].push(deg);
-    if (angleSeries[sel].length > 300) angleSeries[sel].shift();
-
-    document.getElementById('statCurrent').textContent = deg.toFixed(1) + '°';
-    const arr = angleSeries[sel];
-    const mn = Math.min(...arr), mx = Math.max(...arr);
-    document.getElementById('statMin').textContent = mn.toFixed(1) + '°';
-    document.getElementById('statMax').textContent = mx.toFixed(1) + '°';
-    document.getElementById('statRange').textContent = (mx - mn).toFixed(1) + '°';
-
-    if (!chart) {
-      const ctx = document.getElementById('angleChart').getContext('2d');
-      chart = new Chart(ctx, {
-        type: 'line',
-        data: {
-          labels: arr.map((_, i) => i),
-          datasets: [{
-            label: sel,
-            data: arr,
-            borderColor: '#00e5ff',
-            backgroundColor: 'rgba(0,229,255,0.1)',
-            borderWidth: 2,
-            pointRadius: 0,
-            tension: 0.3
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          animation: false,
-          scales: {
-            x: { display: false },
-            y: {
-              min: 0, max: 180,
-              ticks: { color: '#8b9bb4', font: { size: 10 } },
-              grid: { color: 'rgba(255,255,255,0.05)' }
-            }
-          },
-          plugins: { legend: { display: false } }
-        }
-      });
-    } else {
-      chart.data.labels = arr.map((_, i) => i);
-      chart.data.datasets[0].data = arr;
-      chart.data.datasets[0].label = sel;
-      chart.update('none');
-    }
-  }
-
-  document.getElementById('jointSelect')?.addEventListener('change', () => {
-    const sel = document.getElementById('jointSelect').value;
-    if (chart && angleSeries[sel]) {
-      chart.data.datasets[0].data = angleSeries[sel];
-      chart.data.labels = angleSeries[sel].map((_, i) => i);
-      chart.update('none');
-    }
-  });
-
   // ---------- Export ----------
   function exportWebM() {
-    if (!state.recordedChunks.length && !document.getElementById('replay').src) {
+    const vid = document.getElementById('replay');
+    if (!vid.src) {
       toast('Nothing to export');
       return;
     }
-    const vid = document.getElementById('replay');
-    if (vid.src) {
-      const a = document.createElement('a');
-      a.href = vid.src;
-      a.download = `biomechanics_export_${Date.now()}.webm`;
-      a.click();
-      toast('Download started');
-    }
-  }
-
-  function exportCSV() {
-    const sel = document.getElementById('jointSelect').value;
-    const arr = angleSeries[sel] || [];
-    if (!arr.length) { toast('No angle data yet — enable Pose first'); return; }
-    let csv = 'frame,angle_deg\n';
-    arr.forEach((v, i) => { csv += `${i},${v.toFixed(2)}\n`; });
-    const blob = new Blob([csv], { type: 'text/csv' });
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `angles_${sel}_${Date.now()}.csv`;
+    a.href = vid.src;
+    a.download = `biomechanics_export_${Date.now()}.webm`;
     a.click();
-    toast('CSV exported');
+    toast('Download started');
   }
 
   function exportJSON() {
     const data = {
       meta: { created: new Date().toISOString(), room: state.roomCode },
       calibration: state.scalePxPerUnit ? { pxPerUnit: state.scalePxPerUnit, unit: state.unit } : null,
-      annotations: drawHistory,
-      angles: angleSeries
+      annotations: drawHistory
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
@@ -1538,7 +1866,6 @@ body {
           drawHistory = data.annotations;
           redrawAll();
         }
-        if (data.angles) Object.assign(angleSeries, data.angles);
         toast('Session loaded');
       } catch (err) {
         toast('Invalid session file');
@@ -1590,7 +1917,6 @@ body {
   async function switchPhoneCamera() {
     state.phoneFacing = state.phoneFacing === 'environment' ? 'user' : 'environment';
     await startPhoneCamera();
-    // If already connected, the track will update; for simplicity re-call may be needed
     toast('Camera switched');
   }
 
@@ -1626,9 +1952,6 @@ body {
       }
       const call = state.peer.call(hostId, state.phoneStream);
       state.call = call;
-      call.on('stream', () => {
-        // Host doesn't send video back in this design
-      });
       call.on('close', () => {
         document.getElementById('phoneStatus').textContent = 'Disconnected';
         document.getElementById('phoneStatus').className = 'cam-status';
@@ -1641,7 +1964,6 @@ body {
         toast('Could not reach dashboard. Check the code and that iPad is online.');
       });
 
-      // Assume success after a short delay if no error
       setTimeout(() => {
         if (state.call && state.call.open !== false) {
           document.getElementById('phoneStatus').textContent = 'Connected · Streaming to dashboard';
@@ -1673,13 +1995,14 @@ body {
   }
 
   function stopAllStreams() {
-    [state.localStreamA, state.localStreamB, state.phoneStream].forEach(s => {
-      if (s) s.getTracks().forEach(t => t.stop());
+    state.slots.forEach(s => {
+      if (s.stream) s.stream.getTracks().forEach(t => t.stop());
     });
+    if (state.phoneStream) state.phoneStream.getTracks().forEach(t => t.stop());
+    state.remoteCalls.forEach(c => { if (c) try { c.close(); } catch (_) {} });
     if (state.call) try { state.call.close(); } catch (_) {}
   }
 
-  // Prevent accidental zoom on double-tap etc.
   document.addEventListener('gesturestart', (e) => e.preventDefault());
 })();
 </script>
