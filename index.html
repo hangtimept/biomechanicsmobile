@@ -506,14 +506,31 @@ body {
 
 .stage-wrap { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .stage {
-  position: relative; flex: 1; background: #000;
+  position: relative; flex: 1; background: #0a0e14;
   overflow: hidden; min-height: 180px;
   touch-action: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-.stage video, .stage canvas {
-  position: absolute; inset: 0;
-  width: 100%; height: 100%;
-  object-fit: contain;
+/* Content box that always matches the video's true aspect ratio */
+#stageContent {
+  position: relative;
+  background: #000;
+  max-width: 100%;
+  max-height: 100%;
+  /* sized by JS to preserve aspect */
+}
+#stageContent video,
+#stageContent canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+#stageContent video {
+  object-fit: fill; /* content box already matches aspect — no distortion */
 }
 #poseCanvas, #drawCanvas { pointer-events: none; }
 #drawCanvas { pointer-events: auto; }
@@ -522,8 +539,16 @@ body {
   font-family: var(--mono); font-size: 11px;
   background: rgba(0,0,0,0.6); padding: 3px 8px; border-radius: 6px;
   pointer-events: none; opacity: 0; transition: opacity .3s;
+  z-index: 5;
 }
 .zoom-indicator.show { opacity: 1; }
+.stage-empty {
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: center;
+  padding: 24px;
+  pointer-events: none;
+}
 
 .transport {
   display: flex; align-items: center; gap: 6px;
@@ -788,9 +813,12 @@ body {
 
         <div class="stage-wrap">
           <div id="stage" class="stage">
-            <video id="replay" playsinline></video>
-            <canvas id="poseCanvas"></canvas>
-            <canvas id="drawCanvas"></canvas>
+            <div id="stageEmpty" class="stage-empty">Record or import a video to begin analysis</div>
+            <div id="stageContent" style="display:none">
+              <video id="replay" playsinline></video>
+              <canvas id="poseCanvas"></canvas>
+              <canvas id="drawCanvas"></canvas>
+            </div>
             <div id="zoomIndicator" class="zoom-indicator">100%</div>
           </div>
           <div class="transport">
@@ -1289,17 +1317,10 @@ body {
 
   function startRecording() {
     const n = state.cameraCount;
+    // Always record 16:9 so playback is never distorted
     const canvas = document.createElement('canvas');
-    // Layout: 1 → full, 2 → side by side, 3 → three across, 4 → 2×2
-    if (n === 1) {
-      canvas.width = 1280; canvas.height = 720;
-    } else if (n === 2) {
-      canvas.width = 1920; canvas.height = 720;
-    } else if (n === 3) {
-      canvas.width = 1920; canvas.height = 540;
-    } else {
-      canvas.width = 1280; canvas.height = 720;
-    }
+    canvas.width = 1920;
+    canvas.height = 1080;
     const ctx = canvas.getContext('2d');
 
     const stream = canvas.captureStream(30);
@@ -1307,19 +1328,14 @@ body {
     const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
       ? 'video/webm;codecs=vp9'
       : 'video/webm';
-    state.mediaRecorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 6000000 });
+    state.mediaRecorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8000000 });
     state.mediaRecorder.ondataavailable = (e) => {
       if (e.data.size > 0) state.recordedChunks.push(e.data);
     };
     state.mediaRecorder.onstop = () => {
       const blob = new Blob(state.recordedChunks, { type: 'video/webm' });
       const url = URL.createObjectURL(blob);
-      const replay = document.getElementById('replay');
-      replay.src = url;
-      replay.onloadedmetadata = () => {
-        document.getElementById('scrubber').max = Math.floor(replay.duration * 1000);
-        updateTimeDisplay();
-      };
+      loadReplayVideo(url);
       if (document.getElementById('autoDownload').checked) {
         const a = document.createElement('a');
         a.href = url;
@@ -1339,54 +1355,58 @@ body {
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      const videos = state.slots.map((s, i) => document.getElementById('camVideo' + i)).filter(Boolean);
+      const videos = state.slots.map((_, i) => document.getElementById('camVideo' + i));
       const ts = nowStamp();
-      ctx.fillStyle = 'rgba(255,255,255,0.85)';
-      ctx.font = '14px JetBrains Mono';
+      ctx.font = '16px JetBrains Mono';
+      ctx.fillStyle = 'rgba(255,255,255,0.9)';
+
+      // Helper: draw a video (or placeholder) into a rect, covering the rect while preserving source aspect
+      function drawCam(v, x, y, w, h) {
+        if (v && v.readyState >= 2 && v.videoWidth > 0) {
+          // Cover the target rect (crop if needed) so individual cams aren't letterboxed inside the composite
+          const sw = v.videoWidth, sh = v.videoHeight;
+          const scale = Math.max(w / sw, h / sh);
+          const dw = sw * scale, dh = sh * scale;
+          const ox = x + (w - dw) / 2;
+          const oy = y + (h - dh) / 2;
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(x, y, w, h);
+          ctx.clip();
+          ctx.drawImage(v, ox, oy, dw, dh);
+          ctx.restore();
+        } else {
+          ctx.fillStyle = '#111';
+          ctx.fillRect(x, y, w, h);
+          ctx.fillStyle = '#555';
+          ctx.font = '18px Inter';
+          ctx.fillText('No signal', x + w / 2 - 40, y + h / 2);
+          ctx.fillStyle = 'rgba(255,255,255,0.9)';
+          ctx.font = '16px JetBrains Mono';
+        }
+        // subtle divider
+        ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+        ctx.fillText(ts, x + 12, y + h - 14);
+      }
 
       if (n === 1) {
-        const v = videos[0];
-        if (v && v.readyState >= 2) ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
-        ctx.fillText(ts, 12, canvas.height - 12);
+        drawCam(videos[0], 0, 0, 1920, 1080);
       } else if (n === 2) {
-        const w = canvas.width / 2;
-        videos.forEach((v, i) => {
-          if (v && v.readyState >= 2) ctx.drawImage(v, i * w, 0, w, canvas.height);
-          else {
-            ctx.fillStyle = '#111';
-            ctx.fillRect(i * w, 0, w, canvas.height);
-            ctx.fillStyle = '#444';
-            ctx.fillText('No signal', i * w + 40, canvas.height / 2);
-            ctx.fillStyle = 'rgba(255,255,255,0.85)';
-          }
-          ctx.fillText(ts, i * w + 12, canvas.height - 12);
-        });
+        drawCam(videos[0], 0, 0, 960, 1080);
+        drawCam(videos[1], 960, 0, 960, 1080);
       } else if (n === 3) {
-        const w = canvas.width / 3;
-        videos.forEach((v, i) => {
-          if (v && v.readyState >= 2) ctx.drawImage(v, i * w, 0, w, canvas.height);
-          else {
-            ctx.fillStyle = '#111';
-            ctx.fillRect(i * w, 0, w, canvas.height);
-            ctx.fillStyle = 'rgba(255,255,255,0.85)';
-          }
-          ctx.fillText(ts, i * w + 12, canvas.height - 12);
-        });
+        const w = 640;
+        drawCam(videos[0], 0, 0, w, 1080);
+        drawCam(videos[1], w, 0, w, 1080);
+        drawCam(videos[2], w * 2, 0, w, 1080);
       } else {
         // 2×2
-        const w = canvas.width / 2;
-        const h = canvas.height / 2;
-        videos.forEach((v, i) => {
-          const x = (i % 2) * w;
-          const y = Math.floor(i / 2) * h;
-          if (v && v.readyState >= 2) ctx.drawImage(v, x, y, w, h);
-          else {
-            ctx.fillStyle = '#111';
-            ctx.fillRect(x, y, w, h);
-            ctx.fillStyle = 'rgba(255,255,255,0.85)';
-          }
-          ctx.fillText(ts, x + 12, y + h - 12);
-        });
+        drawCam(videos[0], 0, 0, 960, 540);
+        drawCam(videos[1], 960, 0, 960, 540);
+        drawCam(videos[2], 0, 540, 960, 540);
+        drawCam(videos[3], 960, 540, 960, 540);
       }
       requestAnimationFrame(drawFrame);
     }
@@ -1416,6 +1436,74 @@ body {
     vid.addEventListener('pause', () => {
       document.getElementById('btnPlayPause').textContent = '▶';
     });
+    vid.addEventListener('loadedmetadata', () => {
+      layoutStageContent();
+    });
+    window.addEventListener('resize', () => layoutStageContent());
+  }
+
+  /** Size #stageContent so it fits inside #stage while preserving the video's true aspect ratio.
+      Video + overlay canvases then fill that box exactly → zero distortion. */
+  function layoutStageContent() {
+    const stage = document.getElementById('stage');
+    const content = document.getElementById('stageContent');
+    const empty = document.getElementById('stageEmpty');
+    const vid = document.getElementById('replay');
+    if (!stage || !content || !vid) return;
+
+    if (!vid.src || !vid.videoWidth || !vid.videoHeight) {
+      content.style.display = 'none';
+      if (empty) empty.style.display = 'block';
+      return;
+    }
+
+    if (empty) empty.style.display = 'none';
+    content.style.display = 'block';
+
+    const stageW = stage.clientWidth;
+    const stageH = stage.clientHeight;
+    const videoAR = vid.videoWidth / vid.videoHeight;
+    const stageAR = stageW / stageH;
+
+    let w, h;
+    if (videoAR > stageAR) {
+      // video is wider → fit to width
+      w = stageW;
+      h = stageW / videoAR;
+    } else {
+      // video is taller → fit to height
+      h = stageH;
+      w = stageH * videoAR;
+    }
+
+    content.style.width = Math.floor(w) + 'px';
+    content.style.height = Math.floor(h) + 'px';
+
+    // Resize overlay canvases to match content box (device pixels)
+    const dpr = window.devicePixelRatio || 1;
+    ['poseCanvas', 'drawCanvas'].forEach(id => {
+      const c = document.getElementById(id);
+      if (!c) return;
+      c.width = Math.floor(w * dpr);
+      c.height = Math.floor(h * dpr);
+      c.style.width = Math.floor(w) + 'px';
+      c.style.height = Math.floor(h) + 'px';
+      const ctx = c.getContext('2d');
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    });
+
+    // Redraw annotations at the new size
+    if (typeof redrawAll === 'function') redrawAll();
+  }
+
+  function loadReplayVideo(url) {
+    const vid = document.getElementById('replay');
+    vid.src = url;
+    vid.onloadedmetadata = () => {
+      document.getElementById('scrubber').max = Math.floor(vid.duration * 1000);
+      updateTimeDisplay();
+      layoutStageContent();
+    };
   }
 
   function togglePlay() {
@@ -1456,13 +1544,8 @@ body {
     const file = e.target.files?.[0];
     if (!file) return;
     const url = URL.createObjectURL(file);
-    const vid = document.getElementById('replay');
-    vid.src = url;
-    vid.onloadedmetadata = () => {
-      document.getElementById('scrubber').max = Math.floor(vid.duration * 1000);
-      updateTimeDisplay();
-      toast('Video imported');
-    };
+    loadReplayVideo(url);
+    toast('Video imported');
   }
 
   // ---------- Drawing ----------
@@ -1476,25 +1559,14 @@ body {
 
   function initDrawing() {
     const canvas = document.getElementById('drawCanvas');
-    const stage = document.getElementById('stage');
 
-    function resize() {
-      const rect = stage.getBoundingClientRect();
-      canvas.width = rect.width * devicePixelRatio;
-      canvas.height = rect.height * devicePixelRatio;
-      canvas.style.width = rect.width + 'px';
-      canvas.style.height = rect.height + 'px';
-      const ctx = canvas.getContext('2d');
-      ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
-      redrawAll();
-    }
-    resize();
-    window.addEventListener('resize', resize);
+    // Canvas sizing is handled by layoutStageContent() so it always matches the video box
 
     function getPos(e) {
       const rect = canvas.getBoundingClientRect();
       const clientX = e.touches ? e.touches[0].clientX : e.clientX;
       const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      // Coordinates in CSS pixels relative to the content box (matches ctx transform)
       return {
         x: clientX - rect.left,
         y: clientY - rect.top
@@ -1702,8 +1774,15 @@ body {
 
   function redrawAll() {
     const canvas = document.getElementById('drawCanvas');
+    if (!canvas) return;
     const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    // Clear full buffer then restore CSS-pixel transform for drawing
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.restore();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     drawHistory.forEach(s => drawShape(s));
   }
 
@@ -1779,17 +1858,6 @@ body {
   function startPoseLoop() {
     poseRunning = true;
     const vid = document.getElementById('replay');
-    const canvas = document.getElementById('poseCanvas');
-    const stage = document.getElementById('stage');
-
-    function resize() {
-      const rect = stage.getBoundingClientRect();
-      canvas.width = rect.width * devicePixelRatio;
-      canvas.height = rect.height * devicePixelRatio;
-      canvas.style.width = rect.width + 'px';
-      canvas.style.height = rect.height + 'px';
-    }
-    resize();
 
     async function loop() {
       if (!poseRunning || !state.poseEnabled) return;
@@ -1806,15 +1874,24 @@ body {
 
   function onPoseResults(results) {
     const canvas = document.getElementById('poseCanvas');
+    if (!canvas) return;
     const ctx = canvas.getContext('2d');
-    const w = canvas.width / devicePixelRatio;
-    const h = canvas.height / devicePixelRatio;
+    const dpr = window.devicePixelRatio || 1;
+    // MediaPipe drawing helpers scale landmarks by canvas.width/height (buffer pixels).
+    // Use identity transform so they fill the high-DPI buffer correctly.
     ctx.save();
-    ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
-    ctx.clearRect(0, 0, w, h);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (results.poseLandmarks) {
-      drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#00e5ff', lineWidth: 2 });
-      drawLandmarks(ctx, results.poseLandmarks, { color: '#ffffff', lineWidth: 1, radius: 3 });
+      drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, {
+        color: '#00e5ff',
+        lineWidth: 2 * dpr
+      });
+      drawLandmarks(ctx, results.poseLandmarks, {
+        color: '#ffffff',
+        lineWidth: 1 * dpr,
+        radius: 3 * dpr
+      });
     }
     ctx.restore();
   }
