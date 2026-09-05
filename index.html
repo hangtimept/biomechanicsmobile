@@ -1488,6 +1488,7 @@ body {
     const vid = document.getElementById('replay');
     if (!stage || !content || !vid) return;
 
+    // Wait until we actually have dimensions (some formats report late)
     if (!vid.src || !vid.videoWidth || !vid.videoHeight) {
       content.style.display = 'none';
       if (empty) empty.style.display = 'block';
@@ -1497,8 +1498,14 @@ body {
     if (empty) empty.style.display = 'none';
     content.style.display = 'block';
 
-    const stageW = stage.clientWidth;
-    const stageH = stage.clientHeight;
+    // Stage can briefly report 0 size right after mode switch — retry next frame
+    let stageW = stage.clientWidth;
+    let stageH = stage.clientHeight;
+    if (stageW < 32 || stageH < 32) {
+      requestAnimationFrame(() => layoutStageContent());
+      return;
+    }
+
     const videoAR = vid.videoWidth / vid.videoHeight;
     const stageAR = stageW / stageH;
 
@@ -1511,6 +1518,12 @@ body {
       // video is taller → fit to height
       h = stageH;
       w = stageH * videoAR;
+    }
+
+    // Guard against NaN / zero
+    if (!isFinite(w) || !isFinite(h) || w < 1 || h < 1) {
+      requestAnimationFrame(() => layoutStageContent());
+      return;
     }
 
     content.style.width = Math.floor(w) + 'px';
@@ -1533,21 +1546,94 @@ body {
     if (typeof redrawAll === 'function') redrawAll();
   }
 
+  function onVideoReady(vid) {
+    if (!vid.videoWidth || !vid.videoHeight) return;
+    const max = Math.floor((vid.duration || 0) * 1000);
+    document.getElementById('scrubber').max = max > 0 ? max : 1000;
+    updateTimeDisplay();
+    // Layout may need a couple frames after the panel becomes visible
+    layoutStageContent();
+    requestAnimationFrame(() => {
+      layoutStageContent();
+      requestAnimationFrame(layoutStageContent);
+    });
+  }
+
   function loadReplayVideo(url) {
     const vid = document.getElementById('replay');
-    vid.src = url;
-    vid.onloadedmetadata = () => {
-      document.getElementById('scrubber').max = Math.floor(vid.duration * 1000);
-      updateTimeDisplay();
-      layoutStageContent();
+    // Tear down previous source cleanly
+    try { vid.pause(); } catch (_) {}
+    vid.removeAttribute('src');
+    vid.load();
+
+    const empty = document.getElementById('stageEmpty');
+    if (empty) {
+      empty.style.display = 'block';
+      empty.textContent = 'Loading video…';
+    }
+    document.getElementById('stageContent').style.display = 'none';
+
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      if (!vid.videoWidth || !vid.videoHeight) return;
+      settled = true;
+      onVideoReady(vid);
+      toast('Video ready');
     };
+
+    const fail = (msg) => {
+      if (settled) return;
+      settled = true;
+      if (empty) {
+        empty.style.display = 'block';
+        empty.textContent = msg || 'Could not play this video';
+      }
+      document.getElementById('stageContent').style.display = 'none';
+      toast(msg || 'Could not play this video. Try MP4 (H.264) or WebM.');
+    };
+
+    vid.onloadedmetadata = finish;
+    vid.onloadeddata = finish;
+    vid.oncanplay = finish;
+    vid.onerror = () => {
+      const code = vid.error ? vid.error.code : 0;
+      // MEDIA_ERR_SRC_NOT_SUPPORTED = 4 (common with HEVC / exotic codecs)
+      let msg = 'Could not play this video.';
+      if (code === 4) {
+        msg = 'Format not supported by this browser. Export as MP4 (H.264) or WebM and try again.';
+      } else if (code === 3) {
+        msg = 'Video file appears corrupted or incomplete.';
+      }
+      fail(msg);
+    };
+
+    vid.src = url;
+    vid.load();
+
+    // Safety net: if metadata never arrives (unsupported codec with silent fail)
+    setTimeout(() => {
+      if (!settled) {
+        if (vid.videoWidth && vid.videoHeight) {
+          finish();
+        } else {
+          fail('Video did not load. Use MP4 (H.264) or WebM — many phone .MOV / HEVC files need conversion.');
+        }
+      }
+    }, 4000);
   }
 
   function togglePlay() {
     const vid = document.getElementById('replay');
     if (!vid.src) return;
-    if (vid.paused) vid.play();
-    else vid.pause();
+    if (vid.paused) {
+      vid.play().catch((err) => {
+        console.warn(err);
+        toast('Playback blocked — tap Play again');
+      });
+    } else {
+      vid.pause();
+    }
   }
 
   function stepFrame(dir) {
@@ -1580,9 +1666,15 @@ body {
   function importVideo(e) {
     const file = e.target.files?.[0];
     if (!file) return;
+    // Allow re-selecting the same file later
+    e.target.value = '';
+    if (!file.type.startsWith('video/') && !/\.(mp4|webm|mov|m4v|avi|mkv)$/i.test(file.name)) {
+      toast('Please choose a video file');
+      return;
+    }
     const url = URL.createObjectURL(file);
     loadReplayVideo(url);
-    toast('Video imported');
+    toast('Loading ' + (file.name || 'video') + '…');
   }
 
   // ---------- Drawing ----------
