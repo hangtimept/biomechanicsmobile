@@ -200,9 +200,14 @@ body {
 /* Analysis-only mode: single full-width panel */
 .main-grid.analysis-only {
   grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
 }
 .main-grid.analysis-only .capture-panel {
   display: none !important;
+}
+.main-grid.analysis-only .replay-panel {
+  min-height: 0;
+  height: 100%;
 }
 @media (max-width: 1000px) {
   .main-grid {
@@ -526,13 +531,15 @@ body {
   align-items: center;
   justify-content: center;
 }
-/* Content box that always matches the video's true aspect ratio */
+/* Content box — JS sizes it to the video's aspect ratio when known;
+   until then it fills the stage so the browser can decode the video. */
 #stageContent {
   position: relative;
   background: #000;
+  width: 100%;
+  height: 100%;
   max-width: 100%;
   max-height: 100%;
-  /* sized by JS to preserve aspect */
 }
 #stageContent video,
 #stageContent canvas {
@@ -543,7 +550,8 @@ body {
   display: block;
 }
 #stageContent video {
-  object-fit: fill; /* content box already matches aspect — no distortion */
+  object-fit: contain; /* safe default; JS switches to fill once box matches aspect */
+  background: #000;
 }
 #poseCanvas, #drawCanvas { pointer-events: none; }
 #drawCanvas { pointer-events: auto; }
@@ -835,7 +843,7 @@ body {
           <div id="stage" class="stage">
             <div id="stageEmpty" class="stage-empty">Record or import a video to begin analysis</div>
             <div id="stageContent" style="display:none">
-              <video id="replay" playsinline></video>
+              <video id="replay" playsinline preload="auto"></video>
               <canvas id="poseCanvas"></canvas>
               <canvas id="drawCanvas"></canvas>
             </div>
@@ -1479,8 +1487,8 @@ body {
     window.addEventListener('resize', () => layoutStageContent());
   }
 
-  /** Size #stageContent so it fits inside #stage while preserving the video's true aspect ratio.
-      Video + overlay canvases then fill that box exactly → zero distortion. */
+  /** Size #stageContent to the video's aspect ratio when known.
+      Until then, fill the stage so the browser can actually decode the file. */
   function layoutStageContent() {
     const stage = document.getElementById('stage');
     const content = document.getElementById('stageContent');
@@ -1488,48 +1496,59 @@ body {
     const vid = document.getElementById('replay');
     if (!stage || !content || !vid) return;
 
-    // Wait until we actually have dimensions (some formats report late)
-    if (!vid.src || !vid.videoWidth || !vid.videoHeight) {
+    // No source yet → show empty state
+    if (!vid.getAttribute('src') && !vid.src) {
       content.style.display = 'none';
       if (empty) empty.style.display = 'block';
       return;
     }
 
+    // Always reveal the player once a source is set (critical: some browsers
+    // will not report videoWidth while the element is display:none)
     if (empty) empty.style.display = 'none';
     content.style.display = 'block';
 
-    // Stage can briefly report 0 size right after mode switch — retry next frame
-    let stageW = stage.clientWidth;
-    let stageH = stage.clientHeight;
+    const stageW = stage.clientWidth || stage.offsetWidth;
+    const stageH = stage.clientHeight || stage.offsetHeight;
     if (stageW < 32 || stageH < 32) {
+      // Panel not laid out yet — fill and retry
+      content.style.width = '100%';
+      content.style.height = '100%';
       requestAnimationFrame(() => layoutStageContent());
       return;
     }
 
+    const hasDims = vid.videoWidth > 0 && vid.videoHeight > 0;
+
+    if (!hasDims) {
+      // Fill stage while decoding; object-fit:contain keeps it visible
+      content.style.width = stageW + 'px';
+      content.style.height = stageH + 'px';
+      vid.style.objectFit = 'contain';
+      return;
+    }
+
+    // Precise aspect-matched box (annotations align to video pixels)
     const videoAR = vid.videoWidth / vid.videoHeight;
     const stageAR = stageW / stageH;
-
     let w, h;
     if (videoAR > stageAR) {
-      // video is wider → fit to width
       w = stageW;
       h = stageW / videoAR;
     } else {
-      // video is taller → fit to height
       h = stageH;
       w = stageH * videoAR;
     }
-
-    // Guard against NaN / zero
     if (!isFinite(w) || !isFinite(h) || w < 1 || h < 1) {
-      requestAnimationFrame(() => layoutStageContent());
+      content.style.width = stageW + 'px';
+      content.style.height = stageH + 'px';
       return;
     }
 
     content.style.width = Math.floor(w) + 'px';
     content.style.height = Math.floor(h) + 'px';
+    vid.style.objectFit = 'fill';
 
-    // Resize overlay canvases to match content box (device pixels)
     const dpr = window.devicePixelRatio || 1;
     ['poseCanvas', 'drawCanvas'].forEach(id => {
       const c = document.getElementById(id);
@@ -1542,16 +1561,13 @@ body {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     });
 
-    // Redraw annotations at the new size
     if (typeof redrawAll === 'function') redrawAll();
   }
 
   function onVideoReady(vid) {
-    if (!vid.videoWidth || !vid.videoHeight) return;
     const max = Math.floor((vid.duration || 0) * 1000);
     document.getElementById('scrubber').max = max > 0 ? max : 1000;
     updateTimeDisplay();
-    // Layout may need a couple frames after the panel becomes visible
     layoutStageContent();
     requestAnimationFrame(() => {
       layoutStageContent();
@@ -1561,35 +1577,39 @@ body {
 
   function loadReplayVideo(url) {
     const vid = document.getElementById('replay');
-    // Tear down previous source cleanly
-    try { vid.pause(); } catch (_) {}
-    vid.removeAttribute('src');
-    vid.load();
-
+    const content = document.getElementById('stageContent');
     const empty = document.getElementById('stageEmpty');
-    if (empty) {
-      empty.style.display = 'block';
-      empty.textContent = 'Loading video…';
-    }
-    document.getElementById('stageContent').style.display = 'none';
+
+    try { vid.pause(); } catch (_) {}
+
+    // Clear previous handlers so they don't fire on the old source
+    vid.onloadedmetadata = null;
+    vid.onloadeddata = null;
+    vid.oncanplay = null;
+    vid.onerror = null;
 
     let settled = false;
+
     const finish = () => {
       if (settled) return;
-      if (!vid.videoWidth || !vid.videoHeight) return;
+      // Accept finish even if dimensions are still 0 — layout will fill stage
       settled = true;
       onVideoReady(vid);
-      toast('Video ready');
+      if (vid.videoWidth > 0) {
+        toast('Video ready — press ▶ to play');
+      } else {
+        toast('Video loaded — press ▶ to play');
+      }
     };
 
     const fail = (msg) => {
       if (settled) return;
       settled = true;
+      content.style.display = 'none';
       if (empty) {
         empty.style.display = 'block';
         empty.textContent = msg || 'Could not play this video';
       }
-      document.getElementById('stageContent').style.display = 'none';
       toast(msg || 'Could not play this video. Try MP4 (H.264) or WebM.');
     };
 
@@ -1598,39 +1618,61 @@ body {
     vid.oncanplay = finish;
     vid.onerror = () => {
       const code = vid.error ? vid.error.code : 0;
-      // MEDIA_ERR_SRC_NOT_SUPPORTED = 4 (common with HEVC / exotic codecs)
       let msg = 'Could not play this video.';
       if (code === 4) {
         msg = 'Format not supported by this browser. Export as MP4 (H.264) or WebM and try again.';
       } else if (code === 3) {
         msg = 'Video file appears corrupted or incomplete.';
+      } else if (code === 2) {
+        msg = 'Network error while loading video.';
       }
       fail(msg);
     };
 
-    vid.src = url;
-    vid.load();
+    // Show the player area immediately so the browser will decode the stream
+    if (empty) {
+      empty.style.display = 'none';
+    }
+    content.style.display = 'block';
+    content.style.width = '100%';
+    content.style.height = '100%';
+    vid.style.objectFit = 'contain';
 
-    // Safety net: if metadata never arrives (unsupported codec with silent fail)
+    vid.src = url;
+    try { vid.load(); } catch (_) {}
+
+    // Nudge layout now and after a couple frames
+    layoutStageContent();
+    requestAnimationFrame(() => layoutStageContent());
+
+    // Safety net
     setTimeout(() => {
       if (!settled) {
-        if (vid.videoWidth && vid.videoHeight) {
+        if (vid.readyState >= 1 || (vid.videoWidth && vid.videoHeight)) {
           finish();
+        } else if (vid.error) {
+          vid.onerror();
         } else {
           fail('Video did not load. Use MP4 (H.264) or WebM — many phone .MOV / HEVC files need conversion.');
         }
       }
-    }, 4000);
+    }, 5000);
   }
 
   function togglePlay() {
     const vid = document.getElementById('replay');
-    if (!vid.src) return;
+    if (!vid.src && !vid.getAttribute('src')) {
+      toast('Import a video first');
+      return;
+    }
     if (vid.paused) {
-      vid.play().catch((err) => {
-        console.warn(err);
-        toast('Playback blocked — tap Play again');
-      });
+      const p = vid.play();
+      if (p && typeof p.catch === 'function') {
+        p.catch((err) => {
+          console.warn(err);
+          toast('Playback blocked — tap Play again');
+        });
+      }
     } else {
       vid.pause();
     }
@@ -1638,14 +1680,14 @@ body {
 
   function stepFrame(dir) {
     const vid = document.getElementById('replay');
-    if (!vid.src) return;
+    if (!vid.src && !vid.getAttribute('src')) return;
     vid.pause();
     vid.currentTime = Math.max(0, Math.min(vid.duration || 0, vid.currentTime + dir * (1 / 30)));
   }
 
   function onScrub(e) {
     const vid = document.getElementById('replay');
-    if (!vid.src || !vid.duration) return;
+    if ((!vid.src && !vid.getAttribute('src')) || !vid.duration) return;
     vid.currentTime = (e.target.value / 1000);
   }
 
@@ -1668,13 +1710,17 @@ body {
     if (!file) return;
     // Allow re-selecting the same file later
     e.target.value = '';
-    if (!file.type.startsWith('video/') && !/\.(mp4|webm|mov|m4v|avi|mkv)$/i.test(file.name)) {
-      toast('Please choose a video file');
+    const name = file.name || '';
+    const type = file.type || '';
+    const looksLikeVideo = type.startsWith('video/') || /\.(mp4|webm|mov|m4v|avi|mkv|mpeg|mpg)$/i.test(name);
+    if (!looksLikeVideo) {
+      toast('Please choose a video file (MP4, WebM, MOV, …)');
       return;
     }
+    console.log('[BA] Importing', name, type, file.size, 'bytes');
     const url = URL.createObjectURL(file);
     loadReplayVideo(url);
-    toast('Loading ' + (file.name || 'video') + '…');
+    toast('Loading ' + (name || 'video') + '…');
   }
 
   // ---------- Drawing ----------
