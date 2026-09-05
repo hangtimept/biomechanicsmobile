@@ -981,7 +981,12 @@ body {
     annotations: [],
     zoom: 1,
     panX: 0,
-    panY: 0
+    panY: 0,
+    // For format conversion when browser can't play the file natively
+    pendingImportFile: null,
+    converting: false,
+    ffmpeg: null,
+    ffmpegLoading: null
   };
 
   // ---------- Role Selection ----------
@@ -1575,7 +1580,114 @@ body {
     });
   }
 
-  function loadReplayVideo(url) {
+  // ---------- In-browser transcoding (ffmpeg.wasm) for unsupported codecs ----------
+  async function ensureFFmpeg() {
+    if (state.ffmpeg) return state.ffmpeg;
+    if (state.ffmpegLoading) return state.ffmpegLoading;
+
+    state.ffmpegLoading = (async () => {
+      toast('Loading video converter (one-time)…', 6000);
+      const empty = document.getElementById('stageEmpty');
+      if (empty) {
+        empty.style.display = 'block';
+        empty.textContent = 'Loading video converter…';
+      }
+
+      // ESM builds from CDN — works without special server headers (single-thread core)
+      const { FFmpeg } = await import('https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js');
+      const { toBlobURL } = await import('https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/esm/index.js');
+
+      const ffmpeg = new FFmpeg();
+      ffmpeg.on('log', ({ message }) => {
+        // console.log('[ffmpeg]', message);
+      });
+      ffmpeg.on('progress', ({ progress }) => {
+        const pct = Math.min(99, Math.round((progress || 0) * 100));
+        if (empty) empty.textContent = `Converting video… ${pct}%`;
+        const el = document.getElementById('toast');
+        if (el && !el.hidden) el.textContent = `Converting video… ${pct}%`;
+      });
+
+      const base = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/esm';
+      await ffmpeg.load({
+        coreURL: await toBlobURL(`${base}/ffmpeg-core.js`, 'text/javascript'),
+        wasmURL: await toBlobURL(`${base}/ffmpeg-core.wasm`, 'application/wasm')
+      });
+
+      state.ffmpeg = ffmpeg;
+      state.ffmpegLoading = null;
+      return ffmpeg;
+    })();
+
+    try {
+      return await state.ffmpegLoading;
+    } catch (err) {
+      state.ffmpegLoading = null;
+      console.error(err);
+      throw err;
+    }
+  }
+
+  function extFromName(name) {
+    const m = (name || '').match(/\.([a-z0-9]+)$/i);
+    return m ? m[1].toLowerCase() : 'mov';
+  }
+
+  async function convertVideoFile(file) {
+    if (state.converting) {
+      toast('Conversion already in progress');
+      return null;
+    }
+    state.converting = true;
+    const empty = document.getElementById('stageEmpty');
+    const content = document.getElementById('stageContent');
+    try {
+      if (content) content.style.display = 'none';
+      if (empty) {
+        empty.style.display = 'block';
+        empty.textContent = 'Preparing conversion…';
+      }
+      toast('Converting to a playable format…', 8000);
+
+      const ffmpeg = await ensureFFmpeg();
+      const { fetchFile } = await import('https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/esm/index.js');
+
+      const inExt = extFromName(file.name);
+      const inputName = 'input.' + inExt;
+      const outputName = 'output.mp4';
+
+      // Write source into virtual FS
+      await ffmpeg.writeFile(inputName, await fetchFile(file));
+
+      // H.264 + AAC is the most widely playable combo in browsers
+      // ultrafast keeps CPU time reasonable for long clips
+      await ffmpeg.exec([
+        '-i', inputName,
+        '-c:v', 'libx264',
+        '-preset', 'ultrafast',
+        '-crf', '23',
+        '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac',
+        '-b:a', '128k',
+        '-movflags', '+faststart',
+        '-y',
+        outputName
+      ]);
+
+      const data = await ffmpeg.readFile(outputName);
+      // Cleanup virtual files (best-effort)
+      try { await ffmpeg.deleteFile(inputName); } catch (_) {}
+      try { await ffmpeg.deleteFile(outputName); } catch (_) {}
+
+      const blob = new Blob([data.buffer], { type: 'video/mp4' });
+      return URL.createObjectURL(blob);
+    } finally {
+      state.converting = false;
+    }
+  }
+
+  function loadReplayVideo(url, opts = {}) {
+    const { fromConversion = false } = opts;
     const vid = document.getElementById('replay');
     const content = document.getElementById('stageContent');
     const empty = document.getElementById('stageEmpty');
@@ -1592,25 +1704,38 @@ body {
 
     const finish = () => {
       if (settled) return;
-      // Accept finish even if dimensions are still 0 — layout will fill stage
       settled = true;
+      state.pendingImportFile = null;
       onVideoReady(vid);
-      if (vid.videoWidth > 0) {
-        toast('Video ready — press ▶ to play');
-      } else {
-        toast('Video loaded — press ▶ to play');
-      }
+      toast(fromConversion ? 'Converted video ready — press ▶' : 'Video ready — press ▶ to play');
     };
 
-    const fail = (msg) => {
+    const tryConvertOrFail = async (msg) => {
       if (settled) return;
+      // If we still have the original File and haven't already converted, try ffmpeg
+      if (!fromConversion && state.pendingImportFile && !state.converting) {
+        settled = true; // stop the safety timer from double-firing
+        try {
+          const convertedUrl = await convertVideoFile(state.pendingImportFile);
+          if (convertedUrl) {
+            loadReplayVideo(convertedUrl, { fromConversion: true });
+            return;
+          }
+        } catch (err) {
+          console.error('Conversion failed', err);
+          msg = 'Conversion failed. Try exporting the video as MP4 (H.264) on your device.';
+        }
+      }
+      if (settled && fromConversion) {
+        // already marked settled from conversion path failure
+      }
       settled = true;
       content.style.display = 'none';
       if (empty) {
         empty.style.display = 'block';
         empty.textContent = msg || 'Could not play this video';
       }
-      toast(msg || 'Could not play this video. Try MP4 (H.264) or WebM.');
+      toast(msg || 'Could not play this video.');
     };
 
     vid.onloadedmetadata = finish;
@@ -1620,19 +1745,22 @@ body {
       const code = vid.error ? vid.error.code : 0;
       let msg = 'Could not play this video.';
       if (code === 4) {
-        msg = 'Format not supported by this browser. Export as MP4 (H.264) or WebM and try again.';
+        msg = 'Format not supported natively — converting…';
       } else if (code === 3) {
         msg = 'Video file appears corrupted or incomplete.';
       } else if (code === 2) {
         msg = 'Network error while loading video.';
       }
-      fail(msg);
+      // Unsupported → convert; other errors → fail (unless we still want to try convert)
+      if (code === 4 || code === 0) {
+        tryConvertOrFail(msg);
+      } else {
+        tryConvertOrFail(msg);
+      }
     };
 
     // Show the player area immediately so the browser will decode the stream
-    if (empty) {
-      empty.style.display = 'none';
-    }
+    if (empty) empty.style.display = 'none';
     content.style.display = 'block';
     content.style.width = '100%';
     content.style.height = '100%';
@@ -1641,22 +1769,23 @@ body {
     vid.src = url;
     try { vid.load(); } catch (_) {}
 
-    // Nudge layout now and after a couple frames
     layoutStageContent();
     requestAnimationFrame(() => layoutStageContent());
 
-    // Safety net
+    // Safety net — if metadata never arrives, attempt conversion
     setTimeout(() => {
       if (!settled) {
         if (vid.readyState >= 1 || (vid.videoWidth && vid.videoHeight)) {
           finish();
         } else if (vid.error) {
           vid.onerror();
+        } else if (!fromConversion && state.pendingImportFile) {
+          tryConvertOrFail('Browser could not read this file — converting…');
         } else {
-          fail('Video did not load. Use MP4 (H.264) or WebM — many phone .MOV / HEVC files need conversion.');
+          tryConvertOrFail('Video did not load. Try a different file or export as MP4 (H.264).');
         }
       }
-    }, 5000);
+    }, 4000);
   }
 
   function togglePlay() {
@@ -1718,6 +1847,8 @@ body {
       return;
     }
     console.log('[BA] Importing', name, type, file.size, 'bytes');
+    // Keep the File so we can convert if native playback fails (HEVC, etc.)
+    state.pendingImportFile = file;
     const url = URL.createObjectURL(file);
     loadReplayVideo(url);
     toast('Loading ' + (name || 'video') + '…');
